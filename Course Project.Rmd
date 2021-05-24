@@ -1,0 +1,745 @@
+---
+title: "Course Project Submission"
+author: "Bhaumik Patel"
+date: "5/3/2021"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Dataset:
+
+
+The dataset for this report comes from the book Machine Learning with R by Brett Lantz and is in the public domain. The dataset includes information about the insurance policy holder, their dependents, and their medical expenses throughout a year.
+
+_Age:_ Age of primary policyholder.
+_Sex:_ Sex of the policyholder.
+_BMI:_ Body Mass Index of policyholder, defined as the body mass divided by the square of the body height (kg/m^2).
+_Smoker status:_ Whether the policyholder is a smoker or a non-smoker.
+_Children:_ Number of children covered in the policy.
+_Region of residence:_ Residential areas of the policy holder (in the US) - North East, South East, South West, North West.
+_Charges:_ Yearly medical expenses billed by the medical insurance provider ($).
+
+# Goals:
+
+My goal is to determine if there is relationship between attributes and medical costs. Also, I will try to find the difference in medical charges among different groups. In addition, I will try to fit few regression model to predict costs. There will be few extra custom scenarios to check how our model works.
+
+# Data Preprocessing & EDA
+
+```{r}
+suppressPackageStartupMessages({
+  library(psych)
+  library(relaimpo)
+  library(rcompanion)
+  library(ggplot2)
+  library(MASS)
+  library(car)
+  library(caret)
+  library(caTools)
+  library(leaps)
+  library(tidyverse)
+  library(dplyr)})
+```
+
+```{r}
+insurance <- read.csv("insurance.csv")
+str(insurance)
+```
+Now, we will summarize each variable to get statistical interpretation.
+
+```{r}
+insurance %>% colnames()
+```
+```{r}
+insurance$age %>% summary()
+
+insurance$sex %>% table()
+
+insurance$bmi %>% summary()
+
+insurance$children <- insurance$children %>% as.factor()
+insurance$children %>% table()
+
+insurance$smoker %>% table()
+
+insurance$region %>% table()
+
+insurance$charges %>% summary()
+```
+
+I just saved children column as factor levels which will be helpful in further analysis, as in real life most people do not have more than few children.
+
+```{r}
+skimr::skim(insurance)
+```
+
+From different summaries, we can see this data is pretty clean and almost perfect. This dataset has no skewness in independent variables. There is no class imbalance in 'sex'. 
+
+There are four numerical variables and three of them are Continuous (Age, BMI, Charges) and one is Discrete (children).
+There are three categorical variables: Sex, Smoker, Region.
+
+```{r}
+figsize <- options(repr.plot.width=12, repr.plot.height=15) # set plot size for this plot 
+
+# Smoker count plot
+smoker <- insurance %>%
+    ggplot(aes(x=smoker, fill=smoker)) +
+    geom_bar(show.legend = FALSE) +
+    # add percentages on top of bars
+    geom_text(
+        stat='count',
+        aes(label=paste0(round(after_stat(prop*100), digits=1), "%"),group=1),
+        vjust=-0.4,
+        size=4
+    ) +
+    # add labels
+    labs(
+        x = "",
+        y = "",
+        title = "Number of policyholders by smoking"
+    ) +
+    # rename x-ticks
+    scale_x_discrete(
+        labels = c("no" = "Non-smoker", "yes" = "Smoker")
+    ) +
+    # adjust y-ticks
+    scale_y_continuous(
+        breaks=seq(0,2000,100)
+    ) +
+    # resize text
+    theme(
+        plot.title = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10)
+    )
+
+smoker
+
+```
+```{r}
+# Region count plot
+region <- insurance %>%
+    ggplot(aes(x=forcats::fct_infreq(region), fill=region)) +
+    geom_bar(show.legend = FALSE) +
+    # add percentages on top of bars
+    geom_text(
+        stat='count',
+        aes(label = paste0(round(after_stat(prop*100), digits=1), "%"), group=1),
+        vjust=-0.4,
+        size=4
+    ) +
+    # add labels
+    labs(
+        x = "",
+        y = "",
+        title = "Number of policyholders by region"
+    ) +
+    # adjust ticks
+    scale_y_continuous(
+        breaks=seq(0,350,50)
+    ) +
+    # resize text
+    theme(
+        plot.title = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10)
+    )
+
+region
+```
+```{r}
+# Sex count plot
+sex <- insurance %>%
+    ggplot(aes(x=forcats::fct_infreq(sex), fill=sex)) +
+    geom_bar(show.legend = FALSE) +
+    # add percentages on top of bars
+    geom_text(
+        stat='count',
+        aes(
+            label=paste0(round(after_stat(prop*100), digits=1), "%"), group=1),
+        vjust=-0.4,
+        size=4
+    ) +
+    # add labels
+    labs(
+        x = "",
+        y = "",
+        title = "Number of policyholders by sex",
+        fill = "Sex"
+    ) +
+    # adjust y-ticks
+    scale_y_continuous(
+        breaks=seq(0,700,100)
+    ) +
+    # resize text
+    theme(
+        plot.title = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10)
+    )
+
+sex
+
+```
+```{r}
+
+# Children count plot
+children <- insurance %>%
+    ggplot(aes(x=forcats::fct_infreq(children), fill=children)) +
+    geom_bar(show.legend = FALSE) +
+    # add percentages
+    geom_text(
+        stat='count',
+        aes(label=paste0(round(after_stat(prop*100), digits=1), "%"), group=1),
+        vjust=-0.4,
+        size=4
+    ) +
+    # add labels
+    labs(
+        x = "",
+        y = "",
+        title = "Number of dependents per policy"
+    ) +
+    # adjust y-ticks
+    scale_y_continuous(
+        breaks=seq(0,600,50)
+    ) +
+    # resize text
+    theme(
+        plot.title = element_text(size=12),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10)
+    )
+
+children
+```
+```{r}
+
+figsize <- options(repr.plot.width=20, repr.plot.height=16)
+
+# Age distribution
+age_hist <- insurance %>%
+    ggplot(aes(x=age))+
+    geom_histogram(
+        binwidth = 5,
+        show.legend = FALSE,
+        fill="#ff5733"
+    )+
+    labs(
+        x = "Ages of policyholders",
+        y = "Number of policyholders",
+        title = "Distribution of ages"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+age_dens <- insurance %>%
+    ggplot(aes(x=age)) +
+     geom_density(
+        alpha=.3,
+        fill="#ff5733"
+    )+
+    labs(
+        x = "Ages of policyholders",
+        y = "Probability density",
+        title = "Distribution of ages"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+age_box <- insurance %>%
+    ggplot(aes(y=age)) +
+    geom_boxplot(
+        alpha=.5,
+        fill="#ff5733"
+    )+
+    coord_flip() +
+    theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()
+    )+
+    labs(
+        y = "Ages of policyholders",
+        x = "",
+        title = "Distribution of ages"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+age_hist
+age_dens
+age_box
+
+```
+
+
+
+```{r}
+# BMI distribution
+bmi_hist <- insurance %>%
+    ggplot(aes(x=bmi))+
+    geom_histogram(
+        binwidth = 4,
+        show.legend = FALSE,
+        fill = "green"
+    )+
+    labs(
+        x = "BMI scores of policyholders",
+        y = "Number of policyholders",
+        title = "Distribution of BMI scores"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+bmi_dens <- insurance %>%
+    ggplot(aes(x=bmi)) +
+     geom_density(
+        alpha=.3,
+        fill="red"
+    )+
+    labs(
+        x = "BMI scores of policyholders",
+        y = "Probability density",
+        title = "Distribution of BMI scores"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+bmi_box <- insurance %>%
+    ggplot(aes(y=bmi)) +
+    geom_boxplot(
+        alpha=.5,
+        fill="orange"
+    )+
+    coord_flip() +
+    theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()
+    )+
+    labs(
+        y = "BMI scores of policyholders",
+        x = "",
+        title = "Distribution of BMI scores"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+bmi_hist
+bmi_dens
+bmi_box
+```
+```{r}
+# Charges distribution
+charges_hist <- insurance %>%
+    ggplot(aes(x=charges)) +
+    geom_histogram(
+        binwidth = 2000,
+        show.legend = FALSE,
+        fill = "black"
+    )+
+    labs(
+        x = "Charges to policyholders ($)",
+        y = "Number of policyholders",
+        title = "Distribution of medical charges"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+charges_dens <- insurance %>%
+    ggplot(
+        aes(x=charges)
+    ) +
+     geom_density(
+        alpha=.3,
+        fill="cyan"
+    ) +
+    labs(
+        x = "Charges to policyholders ($)",
+        y = "Probability density",
+        title = "Distribution of medical charges"
+    ) +
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+charges_box <- insurance %>%
+    ggplot(aes(y=charges))+
+    geom_boxplot(
+        alpha=.5,
+        fill="yellow"
+    )+
+    coord_flip()+
+    # remove ticks from y-axis
+    theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()
+    )+
+    labs(
+        y = "Charges to policyholders ($)",
+        x = "",
+        title = "Distribution of medical charges"
+    )+
+    # resize text
+    theme(
+        plot.title = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=14)
+    )
+
+charges_hist
+charges_dens
+charges_box
+
+```
+
+_Age:_ Youngest policyholder is 18 and the eldest is 64. All ages in the range are represented fairly equally apart from the youngest and eldest policyholders. 18-23-year-olds are the most populous group (among all 5-year segments) and 60-64-year-olds are the least represented 5-year age group. There are no outliers.
+
+_BMI:_ BMI is normally distributed with the smallest and the largest values being the least common and median and mean being almost identical. There are a few outliers on the larger side. Minimum recorded BMI score is 16 and maximum is 53.1.
+
+_Charges:_ Charges are heavily right-skewed with many outliers on the larger side. This means most charges are fairly low with a few particularly high charges. Smallest charge is \$1,122 and largest charge is \$63,770.
+
+*_Removing Outliers_*
+
+```{r}
+outliers_remover <- function(a){
+  df <- a
+  aa <- c()
+  count <- 1
+  for(i in 1:ncol(df)){
+    if(is.numeric(df[,i])){
+      Q3 <- quantile(df[,i], 0.75, na.rm = TRUE)
+      Q1 <- quantile(df[,i], 0.25, na.rm = TRUE) 
+      IQR <- Q3 - Q1  #IQR(df[,i])
+      upper <- Q3 + 1.5 * IQR
+      lower <- Q1 - 1.5 * IQR
+      for(j in 1:nrow(df)){
+        if(is.na(df[j,i]) == TRUE){
+            next
+        }
+            
+        else if(df[j,i] > upper | df[j,i] < lower){
+          aa[count] <- j
+          count <- count+1                  
+        }
+      }
+    }
+  }
+  
+  df <- df[-aa,]
+}
+
+i_new <- outliers_remover(insurance)
+str(i_new)
+```
+Woah!!!!
+We have removed many lines and now our observations are reduced to 1193 from 1338. So, we have removed _145_ records.
+
+```{r}
+i_new %>% ggplot(aes(color = region)) + facet_wrap(~ region)+
+  geom_point(mapping = aes(x = bmi, y = charges))
+```
+
+```{r}
+i_new %>% ggplot(aes(color = region)) + facet_wrap(~ region)+
+  geom_point(mapping = aes(x = age, y = charges))
+```
+
+# Hypothesis Testing
+
+We will going to check if smoking has effect on charges, which was already indicated by the EDA.
+
+```{r}
+i_new %>%
+    group_by(smoker) %>%
+      summarise(
+        count = n(),
+        min = min(charges),
+        median = median(charges),
+        max = max(charges),
+        IQR = IQR(charges)
+      ) %>%
+    arrange(desc(median)) # sort by median in descending order
+```
+
+H0: There is no difference in the distribution scores.
+HA: There is a difference in the distribution scores.
+
+```{r}
+wilcox.test(i_new$charges ~ i_new$smoker)
+```
+
+Assumptions of the test are as listed below:
+Dependent variable is continuous, two independent categorical variables are present, there is no relationship between the observations in each group of the independent variables or between the groups themselves.
+The shape of distributions of the independent variables must be known. Since the distributions of charges grouped by sex are different, the test is used to determine whether there are differences in the distributions of the two groups. All of these assumptions are met.
+
+The test indicated that there is a significant difference between the groups, W = 6939, p < 0.001. The null hypothesis is _rejected_.
+
+Now, we will going to check the same thing between different regions.
+
+```{r}
+i_new %>%
+    group_by(region) %>%
+      summarise(
+        count = n(),
+        min = min(charges),
+        median = median(charges),
+        max = max(charges),
+        IQR = IQR(charges)
+      ) %>%
+    arrange(desc(median))
+```
+
+H0: There is no difference between the medians.
+HA: There is a difference between the medians.
+
+```{r}
+kruskal.test(i_new$charges ~ i_new$region, data = i_new)
+```
+
+Assumptions of the test are as follows:
+Dependent variable is continuous, two independent categorical variables are present, there is no relationship between the observations in each group of the independent variables or between the groups themselves. All assumptions are met.
+
+The test showed that the difference between the median medical charges in different regions is not significant, H(3) = 10.32, p = 0.016. A significant level of 0.016 indicates a 1.6% risk of concluding that a difference exists when there is no actual difference. The null hypothesis is accepted.
+
+Also, we will check the same difference between policyholders who have different children.
+
+```{r}
+i_new %>%
+    group_by(children) %>%
+      summarise(
+        count = n(),
+        min = min(charges),
+        median = median(charges),
+        max = max(charges),
+        IQR = IQR(charges)
+      ) %>%
+    arrange(desc(median))
+```
+
+```{r}
+kruskal.test(i_new$charges ~ i_new$children)
+```
+
+
+```{r}
+pairwise.wilcox.test(i_new$charges, i_new$children, p.adj = "BH")
+```
+
+```{r}
+# Show which p-values are less than 0.05
+pairwise.wilcox.test(i_new$charges, i_new$children, p.adj = "BH")$p.value < 0.05
+```
+
+We found _significant difference_ between policy holders who have more children. 
+
+# Model Building
+
+## Simple Linear Regression
+
+```{r}
+sl_model <- lm(charges ~ age, data = i_new)
+summary(sl_model)
+```
+
+From the output, we can see the prediction equation is
+
+charges = 1162.53 + 225.23 * age （numbers from Estimate column)
+From the Pr(>|t|) column, we see that the regression coefficient(225.23) is significantly different from zero(p<0.001) and indicates that there's an expected increase of 225.23 of charges for every 1 year increase in age.
+
+The multiple R-squared(0.1908) indicates that the model accounts for 19.08% of the variance in charges. The multiple R-squared is also the squared correlation between the actual and predicted value.
+
+The residual standard error(6526) can be thought of as the average error in predicting charges from age using this model.
+
+The F-statistic tests whether the predictor variables, taken together, predict the response variable above chance levels.
+
+## Multiple linear regression
+
+```{r}
+mul_model <- lm(charges ~ age + sex + bmi + children + smoker + region, data = i_new)
+summary(mul_model)
+```
+
+charges = -3022.73 + 242.6 age + (-352.645) sexmale + 74 bmi + ....
+
+When there's more than one independent variable, the regression coefficients indicate the increase in the dependent variable for a unit change in a predictor variable, holding all other independent variables constant. For example, the regression coefficient for bmi is 74, suggesting that an increase of 1 in bmi is associated with a 74 increase in the charges, controlling for age, sex, children......
+
+We also can see regionsouthwest aren't significantly different from zero (p>0.05), suggesting sex and region aren't linearly related when controlling for the other dependent variables. [The * shows whether important of the dependent variables]
+
+```{r}
+relative_importance <- calc.relimp(mul_model, type = "lmg", rela = TRUE)
+sort(relative_importance$lmg, decreasing = TRUE)
+```
+
+## Stepwise Regression
+
+```{r}
+#backward stepwise
+mul_model1 <- lm(charges ~ age + sex + bmi + children + smoker + region, data = i_new)
+mul_model2 <- lm(charges ~ age + sex + bmi + children + smoker,          data = i_new)
+mul_model3 <- lm(charges ~ age + sex + bmi + children,                   data = i_new)
+#.........
+#library(rcompanion)
+com_mod <- compareLM(mul_model1, mul_model2, mul_model3)
+com_mod
+```
+
+To find best model, we will choose the model with the lowest BIC, AIC and AICc.
+
+```{r}
+#Check the AIC. 
+#Sort the result or Create a line chart for AIC values with model numbers on the x axis, and AIC values on the y axis. 
+com_model <- com_mod$Fit.criteria
+com_model[order(com_model$AIC),]
+plot(com_model$AIC, type = "b", xlab = "model number", ylab = "AICc value")
+```
+
+_mul_model1 is the best._
+
+```{r}
+mul_model <- lm(charges ~ age + sex + bmi + children + smoker + region, data = i_new)
+stepAIC(mul_model, direction = "backward")
+```
+
+## Improving Model Performance
+
+We can see that this model is best till now, but we can improve this model by adding some nonlinear relations. 
+
+```{r}
+# New variables 
+i_new$age2<- i_new$age^2
+i_new$bmi30 <- ifelse(i_new$bmi >= 30 , 1, 0)
+```
+
+```{r}
+set.seed(123)
+split<- sample.split(i_new$charges, SplitRatio = 0.7)
+i_train<- subset(i_new, split == T)
+i_test<- subset(i_new, split == F)
+```
+
+```{r}
+# Define training control
+train.control <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 3)
+```
+
+
+```{r}
+model <- train(charges ~ age + age2 + children + bmi + sex + bmi30*smoker + region,
+             i_train, method="lm", trControl=train.control)
+summary(model)
+```
+
+```{r}
+print(model)
+```
+
+```{r}
+AIC(model$finalModel)
+BIC(model$finalModel)
+```
+We get the _lower_ values for AIC & BIC than before. So, it shows improved model.
+
+## Predictions
+
+```{r}
+# Make new variable prediction
+i_test$pred <- predict(model, i_test)
+
+# Correlation model
+cor(i_test$pred, i_test$charges)
+```
+
+```{r}
+# Graph of correlation between the predicted and actual
+i_test %>%
+ggplot(aes(pred, charges)) +
+geom_point() +
+geom_line(aes(y=pred), color = "orange", size = 2) +
+labs(x="Predicted Value", y="Charges")
+
+```
+
+Now, our final model is shows tight correlation between predicted and original charges. We are moving forward with the final model to generate custom prediction.
+
+# Custom Prediction
+
+
+```{r}
+# Prediction 1
+predict(model, data.frame(age = 36, age2 = 36^2, children = factor(3), 
+                          bmi = 30, sex = "female", bmi30 = 1, 
+                          smoker = "yes", region = "northwest"))
+```
+
+```{r}
+# Prediction 2
+predict(model, data.frame(age = 45, age2 = 45^2, children = factor(0), 
+                          bmi = 25, sex = "male", bmi30 = 0,
+                          smoker = "yes", region = "northeast"))
+```
+
+```{r}
+# Prediction 3
+predict(model, data.frame(age = 70, age2 = 70^2, children = factor(1), 
+                          bmi = 35, sex = "male", bmi30 = 1, 
+                          smoker = "no", region = "southeast"))
+```
+
+```{r}
+# Prediction 4
+predict(model, data.frame(age = 22, age2 = 22^2, children = factor(2), 
+                          bmi = 23, sex = "female", bmi30 = 0, 
+                          smoker = "no", region = "southwest"))
+```
+
+PREDICTION 1: 
+36-year-old woman, non-smoker, obese and with three children, resident of the Northwest region of the USA: US \$ 36314.53
+
+PREDICTION 2:
+45-year-old man, smoker, non-obese and without children, resident of the Northeast region of the USA: US \$ 21189.39
+
+PREDICTION 3:
+70-year-old man, non-smoker, obese and with one children, resident of the southeastern USA: US \$ 20396.44
+
+PREDICTION 4:
+22-year-old woman, non-smoker, non-obese and with two children, resident of the southwestern region of the USA US \$ 4699.332
+
+# Conclusion
+
+In a nutshell, we have done statistical research of the insurance data which consists all the related information of the policyholder. After that we have done EDA and Data visualization to get the better insights. We got some outliers in few features so we removed it so our model can be better. We have found the relation between different feature with different attachments together. We have built simple linear regression and multiple linear regression model. In addition we have added few additional parameters so our model can be more accurate. Finally, after our model is done and we have checked some custom prediction. 
